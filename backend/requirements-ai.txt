@@ -1,0 +1,4 @@
+# Optional semantic model. The application works immediately with a deterministic,
+# local hashing embedder and upgrades automatically when this is installed.
+-r requirements.txt
+sentence-transformers>=3.0.0
