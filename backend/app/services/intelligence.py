@@ -2,7 +2,7 @@ import json
 import re
 from collections import Counter
 from app.core.config import get_settings
-from app.services.retrieval import retrieve
+from app.services.retrieval import query_terms, retrieve, tokenize
 
 SUMMARY_FIELDS = {
     "abstract_summary": ("abstract", "summary"),
@@ -21,7 +21,12 @@ SUMMARY_FIELDS = {
 
 
 def _sentences(text: str) -> list[str]:
-    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if len(sentence.strip()) > 35]
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        sentence = re.sub(r"^[\s\u2022\ufffd�\-]+", "", sentence).strip()
+        if len(sentence) > 35:
+            sentences.append(sentence)
+    return sentences
 
 
 def _extract_evidence(sections, terms: tuple[str, ...], maximum: int) -> str:
@@ -93,21 +98,91 @@ def gaps(paper) -> dict:
 
 
 def answer_question(paper, question: str) -> tuple[str, list[dict]]:
-    selected = retrieve(paper.sections, question)
-    sources = [{"page": item.page_number, "excerpt": item.content[:500]} for item in selected]
-    if not selected:
-        return "No extracted text is available for this paper. It may require OCR before it can be queried.", sources
-    context = "\n\n".join(f"[Page {item.page_number}] {item.content}" for item in selected)
+    if not paper.sections:
+        return "I couldn’t find extracted text for this paper. It may need OCR before I can answer questions about it.", []
+
+    question_tokens = set(tokenize(question))
+    generic = {"paper", "study", "use", "used", "using", "introduce", "introduced", "describe", "explain", "tell", "about", "include", "including", "find", "give", "state", "many", "much", "number"}
+    intent_terms = {
+        "architecture": {"architecture", "transformer", "encoder", "decoder", "attention"},
+        "layer": {"layer", "layers", "encoder", "decoder", "stacked", "number"},
+        "model": {"model", "models", "transformer", "bert", "cnn", "rnn", "svm", "network", "encoder"},
+        "algorithm": {"algorithm", "transformer", "bert", "cnn", "rnn", "svm", "network"},
+        "dataset": {"dataset", "corpus", "benchmark", "wmt", "data"},
+        "result": {"result", "accuracy", "performance", "bleu", "f1", "improve"},
+        "limitation": {"limitation", "limited", "constraint", "future", "challenge"},
+        "problem": {"problem", "challenge", "issue", "solve", "addresses"},
+    }
+    expected = set().union(*(terms for intent, terms in intent_terms.items() if intent in question_tokens))
+    requested = (question_tokens - generic) | expected
+    if not requested:
+        return "I couldn’t find a passage in this paper that answers that question. Try asking about a specific topic, method, result, or limitation.", []
+
+    # Score and select at sentence level. Chunk-level retrieval can surface a
+    # page that contains a stray query word (for example a copyright footer).
+    evidence = []
+    for section in paper.sections:
+        for sentence in _sentences(section.content):
+            if len(sentence) > 420 or re.search(r"feature\s+existing system\s+proposed system|table\s+\d+\.\d+", sentence, re.I):
+                continue
+            sentence_tokens = set(tokenize(sentence))
+            matched = requested.intersection(sentence_tokens)
+            intent_matched = expected.intersection(sentence_tokens)
+            if not matched:
+                continue
+            score = len(matched) + 2 * len(intent_matched)
+            evidence.append((score, len(intent_matched), section.page_number, sentence, sentence_tokens))
+
+    evidence.sort(key=lambda item: (item[0], item[1], -item[2]), reverse=True)
+    if not evidence:
+        return "I couldn’t find a passage in this paper that answers that question. Try asking about a specific topic, method, result, or limitation.", []
+
+    top_score = evidence[0][0]
+    # Reject weak matches: require either an intent match or two content words.
+    qualifying = [item for item in evidence if item[0] >= max(2, top_score - 1) and (item[1] > 0 or len(requested.intersection(item[4])) >= 2)]
+    if not qualifying:
+        return "I couldn’t find a passage in this paper that answers that question. Try asking about a specific topic, method, result, or limitation.", []
+
+    # Count questions require explicit numeric evidence; a sentence that only
+    # says "stacked layers" cannot support an exact layer count.
+    if re.search(r"\bhow many\b|\bnumber of\b|\bhow much\b", question, re.I):
+        numeric = [item for item in qualifying if re.search(r"\b\d+(?:\.\d+)?\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|dozen|hundred|thousand)\b", item[3], re.I)]
+        if not numeric:
+            return "The paper discusses this, but I couldn’t find an explicit count in the extracted text.", []
+        qualifying = numeric
+
+    chosen = []
+    seen = set()
+    for _, _, page, sentence, _ in qualifying:
+        normalized = sentence.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        chosen.append((page, sentence))
+        if len(chosen) == 2:
+            break
+    sources = [{"page": page, "excerpt": sentence[:500]} for page, sentence in chosen]
+    if not sources:
+        return "I couldn’t find a passage in this paper that answers that question. Try rephrasing it with terms used in the paper.", []
+
+    context = "\n\n".join(f"[Page {page}] {sentence}" for page, sentence in chosen)
     prompt = (
-        "Answer the question using only the supplied paper excerpts. Cite pages as [p. N]. "
+        "Answer the question using only the supplied paper excerpts. Give a concise direct answer. "
+        "Cite every factual claim with the supporting page as [p. N]. Do not use general knowledge. "
         "If the evidence does not answer it, say it is not available in the paper.\n\n"
         f"Question: {question}\n\nEvidence:\n{context}"
     )
     generated = _gemini(prompt)
     if generated:
-        return generated, sources
-    evidence = " ".join(item.content[:350] for item in selected[:2])
-    return f"An LLM provider is not configured, so here is the most relevant evidence from the paper: {evidence}", sources
+        return generated.strip(), sources
+
+    answer_parts = []
+    for page, sentence in chosen:
+        citation = f"[p. {page}]"
+        if answer_parts and citation in answer_parts[-1]:
+            continue
+        answer_parts.append(f"{sentence} {citation}")
+    return " ".join(answer_parts), sources
 
 
 def topic_counts(papers) -> list[dict]:

@@ -11,6 +11,7 @@ venv/
 backend/uploads/
 backend/smoke_uploads/
 backend/*.db
+backend/uvicorn.*.log
 
 # JavaScript
 frontend/node_modules/
