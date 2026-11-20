@@ -50,9 +50,24 @@ Requirements: Python 3.12+, Node.js 20+, and optionally MySQL 8.
 
 With the backend running, interactive OpenAPI documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs), and the schema is at `/openapi.json`.
 
-## Separate Render deployment
+## Deploy frontend and backend separately on Vercel
 
-The included `render.yaml` defines separate frontend and backend services, plus a managed PostgreSQL database and persistent PDF upload disk. To deploy, connect the GitHub repository to Render and create a Blueprint from that file. The database and persistent disk use paid Render plans. Before confirming creation, review the current plan prices in Render. If you have a Gemini API key, add `GEMINI_API_KEY` in the backend service environment after the Blueprint is created; the key is optional and is not stored in this repository. The frontend build receives `VITE_API_URL`, and backend CORS is restricted to the frontend service URL.
+Vercel can deploy the Vite frontend and FastAPI backend as two projects from this repository. The backend uses Vercel's Python runtime through `backend/index.py`.
+
+1. Create a PostgreSQL database through a Vercel Marketplace provider such as Neon, or another provider reachable from Vercel. Keep its connection URL private.
+2. Import this GitHub repository into Vercel and create the backend project with **Root Directory** set to `backend`. Use the Python framework/runtime detection, then add these environment variables for Production (and Preview if desired):
+   - `DATABASE_URL`: the provider's PostgreSQL connection string.
+   - `JWT_SECRET`: a long, random secret.
+   - `CORS_ORIGINS`: the exact production frontend origin, such as `https://your-frontend.vercel.app`.
+   - `UPLOADS_DIR`: `/tmp/research-intel-uploads`.
+   - `MAX_UPLOAD_MB`: `20`.
+   - `GEMINI_API_KEY`: optional; add it only if you want Gemini-generated responses.
+3. Deploy the backend project. Copy its production domain, then confirm `https://<backend-domain>/health` returns `{"status":"ok", ...}` and `/docs` opens.
+4. Import the same GitHub repository a second time as a new Vercel project. Set **Root Directory** to `frontend`, choose Vite if prompted, and set `VITE_API_URL` to the backend's full origin, for example `https://your-api.vercel.app`.
+5. Deploy the frontend. Update the backend's `CORS_ORIGINS` to the exact frontend production origin and redeploy the backend if needed.
+6. Test registration, login, PDF upload, analysis, chat, and export from the frontend.
+
+Vercel Functions have a read-only filesystem except for temporary `/tmp` storage. The app extracts and stores searchable paper sections in PostgreSQL, but the original PDF file itself is not durably retained on Vercel. If durable original-PDF retention is required, configure an external object store before using this deployment for long-term paper storage. The Python runtime and FastAPI support are documented in [Vercel's Python runtime guide](https://vercel.com/docs/functions/runtimes/python) and [FastAPI guide](https://vercel.com/docs/frameworks/backend/fastapi).
 
 Key routes:
 

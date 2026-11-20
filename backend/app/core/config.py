@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,7 +23,10 @@ class Settings(BaseSettings):
 
     @property
     def upload_path(self) -> Path:
-        path = Path(self.uploads_dir)
+        uploads_dir = self.uploads_dir
+        if os.getenv("VERCEL") and not os.getenv("UPLOADS_DIR"):
+            uploads_dir = "/tmp/research-intel-uploads"
+        path = Path(uploads_dir)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
