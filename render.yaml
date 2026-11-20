@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: paperly-research-intelligence
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:////tmp/research_intel.db
+      - key: UPLOADS_DIR
+        value: /tmp/research_uploads
+      - key: MAX_UPLOAD_MB
+        value: "20"
