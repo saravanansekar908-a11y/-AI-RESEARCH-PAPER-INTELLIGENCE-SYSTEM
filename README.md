@@ -52,7 +52,7 @@ With the backend running, interactive OpenAPI documentation is available at [htt
 
 ## Separate Render deployment
 
-The included `render.yaml` defines separate frontend and backend services, plus a managed PostgreSQL database and persistent PDF upload disk. To deploy, connect the GitHub repository to Render and create a Blueprint from that file. The database and persistent disk use paid Render plans. Before confirming creation, review the current plan prices in Render. Set `GEMINI_API_KEY` in the backend service environment after the Blueprint is created; it is intentionally marked secret and is not stored in this repository. The frontend build receives `VITE_API_URL`, and backend CORS is restricted to the frontend service URL.
+The included `render.yaml` defines separate frontend and backend services, plus a managed PostgreSQL database and persistent PDF upload disk. To deploy, connect the GitHub repository to Render and create a Blueprint from that file. The database and persistent disk use paid Render plans. Before confirming creation, review the current plan prices in Render. If you have a Gemini API key, add `GEMINI_API_KEY` in the backend service environment after the Blueprint is created; the key is optional and is not stored in this repository. The frontend build receives `VITE_API_URL`, and backend CORS is restricted to the frontend service URL.
 
 Key routes:
 
